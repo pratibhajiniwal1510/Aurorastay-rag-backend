@@ -1,0 +1,30 @@
+FROM python:3.11-slim
+
+# Prevent Python from writing .pyc files and buffer stdout/stderr
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+ENV HF_HOME=/app/hf_cache
+
+WORKDIR /app
+
+# Install system build essentials needed by ChromaDB/SQLite
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Python dependencies
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Pre-cache the embedding model inside the image for fast cold starts
+RUN python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('BAAI/bge-small-en-v1.5')"
+
+# Copy application code and serialized ChromaDB vector store
+COPY app.py .
+COPY aurorastay_chroma_db ./aurorastay_chroma_db
+
+# Expose port 7860 (standard for Hugging Face Spaces & cloud containers)
+EXPOSE 7860
+
+# Start Flask app with Gunicorn (1 worker so the embedding model is loaded once in RAM)
+CMD ["gunicorn", "--bind", "0.0.0.0:7860", "--workers", "1", "--timeout", "120", "app:app"]
